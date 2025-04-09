@@ -1,16 +1,16 @@
 # mcp-anki-server
 
-## prerequsites
+## prerequisite
 
 - [Anki Desktop](https://apps.ankiweb.net/)
 - [Anki Connect](https://ankiweb.net/shared/info/2055492159)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
 
-## Usage
+## usage
 
 
-### Cursor
+### cursor
 
 update `.mcp.json` to add the following:
 
@@ -28,7 +28,7 @@ update `.mcp.json` to add the following:
 }
 ```
 
-### Chatwise
+### chatwise
 
 Go to Settings -> Tools -> Add and use the following config:
 
