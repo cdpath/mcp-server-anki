@@ -1,0 +1,37 @@
+[project]
+name = "mcp-server-anki"
+version = "0.1.0"
+description = "MCP Server for Anki via AnkiConnect"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    {name = "cdpath", email = "cdpath@outlook.com"}
+]
+keywords = ["anki", "mcp", "ankiconnect"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "aiohttp>=3.11.16",
+    "mcp>=1.6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/cdpath/mcp-server-anki"
+Repository = "https://github.com/cdpath/mcp-server-anki.git"
+Issues = "https://github.com/cdpath/mcp-server-anki/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_server_anki"]
+
+[project.scripts]
+mcp-server-anki = "mcp_server_anki.server:main"
