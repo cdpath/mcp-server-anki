@@ -1,6 +1,6 @@
 [project]
 name = "mcp-server-anki"
-version = "0.1.2"
+version = "0.1.3"
 description = "MCP Server for Anki via AnkiConnect"
 readme = "README.md"
 requires-python = ">=3.10"
