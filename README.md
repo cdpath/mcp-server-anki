@@ -18,8 +18,8 @@ update `.mcp.json` to add the following:
 {
     "mcpServers": {
       "anki": {
-        "command": "uv",
-        "args": ["run", "--with", "mcp-server-anki", "mcp-server-anki"],
+        "command": "uvx",
+        "args": ["mcp-server-anki"],
         "env": {},
         "disabled": false,
         "autoApprove": []
@@ -35,5 +35,5 @@ Go to Settings -> Tools -> Add and use the following config:
 ```
 Type: stdio
 ID: Anki
-Command: uv run --with mcp-server-anki mcp-server-anki
+Command: uvx mcp-server-anki
 ```
