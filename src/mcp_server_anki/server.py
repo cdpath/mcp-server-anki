@@ -35,8 +35,8 @@ class AnkiServer:
     def _setup_handlers(self):
         """Set up resources and tools for the MCP server."""
         
-        @self.mcp.resource("decks://")
-        async def list_decks() -> str:
+        @self.mcp.tool()
+        async def list_decks(ctx: Context) -> str:
             """List all the decks"""
             decks = await self.anki_request("deckNamesAndIds")
             """
@@ -44,8 +44,8 @@ class AnkiServer:
             """
             return json.dumps(decks)
 
-        @self.mcp.resource("decks://{deck_name}")
-        async def get_deck_config(deck_name: str) -> str:
+        @self.mcp.tool()
+        async def get_deck_config(ctx: Context, deck_name: str) -> str:
             """Get configuration of specific deck."""
             config = await self.anki_request("getDeckConfig", {"deck": deck_name})
             """
@@ -79,7 +79,7 @@ class AnkiServer:
             return await self.anki_request("saveDeckConfig", {"config": config})
 
         @self.mcp.tool()
-        async def set_deck_config_id(ctx: Context, decks: list[str], config_id: int) -> bool:
+        async def set_deck_config_id(ctx: Context, decks: list[str], config_id: Union[str, int]) -> bool:
             """Set configuration group for decks.
             
             Args:
@@ -91,11 +91,11 @@ class AnkiServer:
             """
             return await self.anki_request("setDeckConfigId", {
                 "decks": decks,
-                "configId": config_id
+                "configId": int(config_id)
             })
 
         @self.mcp.tool()
-        async def clone_deck_config_id(ctx: Context, name: str, clone_from: int) -> int:
+        async def clone_deck_config_id(ctx: Context, name: str, clone_from: Union[str, int]) -> int:
             """Create new options group, cloning from an existing one.
             
             Args:
@@ -107,11 +107,11 @@ class AnkiServer:
             """
             return await self.anki_request("cloneDeckConfigId", {
                 "name": name,
-                "cloneFrom": clone_from
+                "cloneFrom": int(clone_from)
             })
 
         @self.mcp.tool()
-        async def remove_deck_config(ctx: Context, config_id: int) -> bool:
+        async def delete_deck_config(ctx: Context, config_id: Union[str, int]) -> bool:
             """Remove a configuration group.
             
             Args:
@@ -120,10 +120,10 @@ class AnkiServer:
             Returns:
                 True if successful
             """
-            return await self.anki_request("removeDeckConfig", {"configId": config_id})
+            return await self.anki_request("removeDeckConfigId", {"configId": int(config_id)})
 
-        @self.mcp.resource("models://")
-        async def list_models() -> str:
+        @self.mcp.tool()
+        async def list_models(ctx: Context) -> str:
             """List all the models and their templates and fields"""
             model_names_and_ids = await self.anki_request("modelNamesAndIds")
             """
@@ -160,8 +160,8 @@ class AnkiServer:
             """
             return json.dumps(models)
 
-        @self.mcp.resource("models://{model_name}")
-        async def get_model_info(model_name: str) -> str:
+        @self.mcp.tool()
+        async def get_model_info(ctx: Context, model_name: str) -> str:
             """Get model info for a specific model, including templates and fields"""
             fields_on_templates = await self.anki_request("modelFieldsOnTemplates", {"modelName": model_name})
             """
@@ -172,8 +172,8 @@ class AnkiServer:
             """
             return json.dumps(fields_on_templates)
 
-        @self.mcp.resource("cards://{card_id}")
-        async def get_card_info(card_id: str) -> str:
+        @self.mcp.tool()
+        async def get_card_info(ctx: Context, card_id: Union[str, int]) -> str:
             """Get information about a specific card."""
             cards = await self.anki_request("cardsInfo", {"cards": [int(card_id)]})
             if not cards:
@@ -205,8 +205,8 @@ class AnkiServer:
             """
             return json.dumps(cards[0])
 
-        @self.mcp.resource("notes://{note_id}")
-        async def get_note_info(note_id: str) -> str:
+        @self.mcp.tool()
+        async def get_note_info(ctx: Context, note_id: Union[str, int]) -> str:
             """Get information about a specific note."""
             notes = await self.anki_request("notesInfo", {"notes": [int(note_id)]})
             if not notes:
@@ -227,8 +227,8 @@ class AnkiServer:
             """
             return json.dumps(notes[0])
 
-        @self.mcp.resource("tags://")
-        async def list_all_tags() -> str:
+        @self.mcp.tool()
+        async def list_all_tags(ctx: Context) -> str:
             """Get all available tags."""
             tags = await self.anki_request("getTags")
             return json.dumps(tags)
@@ -273,7 +273,7 @@ class AnkiServer:
         @self.mcp.tool()
         async def update_note_fields(
             ctx: Context,
-            note_id: int,
+            note_id: Union[str, int],
             fields: Dict[str, str]
         ) -> None:
             """Update the fields of an existing note."""
@@ -282,14 +282,14 @@ class AnkiServer:
             })
 
         @self.mcp.tool()
-        async def delete_notes(ctx: Context, note_ids: list[int]) -> None:
+        async def delete_notes(ctx: Context, note_ids: list[Union[str, int]]) -> None:
             """Delete notes by their IDs."""
             return await self.anki_request("deleteNotes", {"notes": note_ids})
 
         @self.mcp.tool()
         async def add_tags(
             ctx: Context,
-            note_ids: list[int],
+            note_ids: list[Union[str, int]],
             tags: str
         ) -> None:
             """Add tags to notes."""
@@ -299,9 +299,9 @@ class AnkiServer:
             })
 
         @self.mcp.tool()
-        async def remove_tags(
+        async def delete_tags(
             ctx: Context,
-            note_ids: list[int],
+            note_ids: list[Union[str, int]],
             tags: str
         ) -> None:
             """Remove tags from notes."""
@@ -311,7 +311,7 @@ class AnkiServer:
             })
 
         @self.mcp.tool()
-        async def batch_get_cards_info(ctx: Context, card_ids: list[int]) -> list[Dict[str, Any]]:
+        async def batch_get_cards_info(ctx: Context, card_ids: list[Union[str, int]]) -> list[Dict[str, Any]]:
             """Get information about specific cards."""
             return await self.anki_request("cardsInfo", {"cards": card_ids})
 
@@ -340,14 +340,14 @@ class AnkiServer:
             return await self.anki_request("createDeck", {"deck": deck_name})
 
         @self.mcp.tool()
-        async def batch_get_cards_review_logs(ctx: Context, card_ids: list[int]) -> list[Dict[str, Any]]:
+        async def batch_get_cards_review_logs(ctx: Context, card_ids: list[Union[str, int]]) -> list[Dict[str, Any]]:
             """Get review history for specific cards."""
             return await self.anki_request("getReviewsOfCards", {"cards": card_ids})
 
         @self.mcp.tool()
         async def set_card_due_time(
             ctx: Context,
-            card_id: int,
+            card_id: Union[str, int],
             days_from_now: int
         ) -> bool:
             """Set the due time for cards."""
@@ -422,7 +422,7 @@ class AnkiServer:
             return await self.anki_request("insertReviews", {"reviews": reviews})
 
         @self.mcp.tool()
-        async def get_ease_factors(ctx: Context, card_ids: list[int]) -> list[int]:
+        async def get_ease_factors(ctx: Context, card_ids: list[Union[str, int]]) -> list[int]:
             """Gets the ease factor for each of the given cards.
             
             Args:
@@ -431,10 +431,11 @@ class AnkiServer:
             Returns:
                 List of ease factors (in the same order as the input cards)
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("getEaseFactors", {"cards": card_ids})
 
         @self.mcp.tool()
-        async def set_ease_factors(ctx: Context, card_ids: list[int], ease_factors: list[int]) -> list[bool]:
+        async def set_ease_factors(ctx: Context, card_ids: list[Union[str, int]], ease_factors: list[int]) -> list[bool]:
             """Sets ease factor of cards by card ID.
             
             Args:
@@ -444,13 +445,14 @@ class AnkiServer:
             Returns:
                 List of booleans indicating success for each card
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("setEaseFactors", {
                 "cards": card_ids,
                 "easeFactors": ease_factors
             })
 
         @self.mcp.tool()
-        async def suspend_cards(ctx: Context, card_ids: list[int]) -> bool:
+        async def suspend_cards(ctx: Context, card_ids: list[Union[str, int]]) -> bool:
             """Suspend cards by card ID.
             
             Args:
@@ -459,10 +461,11 @@ class AnkiServer:
             Returns:
                 True if successful (at least one card wasn't already suspended)
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("suspend", {"cards": card_ids})
 
         @self.mcp.tool()
-        async def unsuspend_cards(ctx: Context, card_ids: list[int]) -> bool:
+        async def unsuspend_cards(ctx: Context, card_ids: list[Union[str, int]]) -> bool:
             """Unsuspend cards by card ID.
             
             Args:
@@ -471,10 +474,11 @@ class AnkiServer:
             Returns:
                 True if successful (at least one card was previously suspended)
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("unsuspend", {"cards": card_ids})
 
         @self.mcp.tool()
-        async def are_suspended(ctx: Context, card_ids: list[int]) -> list[Optional[bool]]:
+        async def are_suspended(ctx: Context, card_ids: list[Union[str, int]]) -> list[Optional[bool]]:
             """Check suspension status for multiple cards.
             
             Args:
@@ -483,10 +487,11 @@ class AnkiServer:
             Returns:
                 List of booleans (True if suspended) or None if card doesn't exist
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("areSuspended", {"cards": card_ids})
 
         @self.mcp.tool()
-        async def are_due(ctx: Context, card_ids: list[int]) -> list[bool]:
+        async def are_due(ctx: Context, card_ids: list[Union[str, int]]) -> list[bool]:
             """Check if cards are due.
             
             Args:
@@ -495,10 +500,11 @@ class AnkiServer:
             Returns:
                 List of booleans indicating whether each card is due
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("areDue", {"cards": card_ids})
 
         @self.mcp.tool()
-        async def get_intervals(ctx: Context, card_ids: list[int], complete: bool = False) -> Union[list[int], list[list[int]]]:
+        async def get_intervals(ctx: Context, card_ids: list[Union[str, int]], complete: bool = False) -> Union[list[int], list[list[int]]]:
             """Get intervals for cards.
             
             Args:
@@ -510,13 +516,14 @@ class AnkiServer:
                 If complete=True: List of lists containing all intervals
                 Negative intervals are in seconds, positive intervals in days
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("getIntervals", {
                 "cards": card_ids,
                 "complete": complete
             })
 
         @self.mcp.tool()
-        async def lookup_note_ids_for_cards(ctx: Context, card_ids: list[int]) -> list[int]:
+        async def lookup_note_ids_for_cards(ctx: Context, card_ids: list[Union[str, int]]) -> list[int]:
             """Convert card IDs to their corresponding note IDs.
             
             Args:
@@ -525,10 +532,11 @@ class AnkiServer:
             Returns:
                 List of unique note IDs (duplicates removed)
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("cardsToNotes", {"cards": card_ids})
 
         @self.mcp.tool()
-        async def get_cards_modification_time(ctx: Context, card_ids: list[int]) -> list[Dict[str, Any]]:
+        async def get_cards_modification_time(ctx: Context, card_ids: list[Union[str, int]]) -> list[Dict[str, Any]]:
             """Get modification times for cards.
             
             Args:
@@ -537,24 +545,27 @@ class AnkiServer:
             Returns:
                 List of objects containing cardId and mod timestamp
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("cardsModTime", {"cards": card_ids})
 
         @self.mcp.tool()
-        async def forget_cards(ctx: Context, card_ids: list[int]) -> None:
+        async def forget_cards(ctx: Context, card_ids: list[Union[str, int]]) -> None:
             """Reset cards to new state.
             
             Args:
                 card_ids: List of card IDs to reset
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("forgetCards", {"cards": card_ids})
 
         @self.mcp.tool()
-        async def relearn_cards(ctx: Context, card_ids: list[int]) -> None:
+        async def relearn_cards(ctx: Context, card_ids: list[Union[str, int]]) -> None:
             """Make cards relearning.
             
             Args:
                 card_ids: List of card IDs to set to relearning
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("relearnCards", {"cards": card_ids})
 
         @self.mcp.tool()
@@ -572,7 +583,7 @@ class AnkiServer:
             return await self.anki_request("answerCards", {"answers": answers})
 
         @self.mcp.tool()
-        async def set_due_date(ctx: Context, card_ids: list[int], days: str) -> bool:
+        async def set_due_date(ctx: Context, card_ids: list[Union[str, int]], days: str) -> bool:
             """Set due date for cards.
             
             Args:
@@ -585,6 +596,7 @@ class AnkiServer:
             Returns:
                 True if successful
             """
+            card_ids = [int(card_id) for card_id in card_ids]
             return await self.anki_request("setDueDate", {
                 "cards": card_ids,
                 "days": days
@@ -643,7 +655,7 @@ class AnkiServer:
             return await self.anki_request("clearUnusedTags")
 
         @self.mcp.tool()
-        async def replace_tags(ctx: Context, replace_all: bool = False, note_ids: Optional[list[int]] = None, tag_to_replace: str = None, replace_with_tag: str = None) -> None:
+        async def replace_tags(ctx: Context, replace_all: bool = False, note_ids: Optional[list[Union[str, int]]] = None, tag_to_replace: str = None, replace_with_tag: str = None) -> None:
             """Replace tags in specific notes or all notes.
             
             Args:
@@ -658,6 +670,7 @@ class AnkiServer:
                     "replace_with_tag": replace_with_tag
                 })
             else:
+                note_ids = [int(note_id) for note_id in note_ids]
                 return await self.anki_request("replaceTags", {
                     "notes": note_ids,
                     "tag_to_replace": tag_to_replace,
@@ -665,7 +678,7 @@ class AnkiServer:
                 })
 
         @self.mcp.tool()
-        async def get_notes_info(ctx: Context, note_ids: Optional[list[int]] = None, query: Optional[str] = None) -> list[Dict[str, Any]]:
+        async def get_notes_info(ctx: Context, note_ids: Optional[list[Union[str, int]]] = None, query: Optional[str] = None) -> list[Dict[str, Any]]:
             """Get detailed information about notes.
             
             Args:
@@ -683,13 +696,14 @@ class AnkiServer:
             """
             params = {}
             if note_ids is not None:
+                note_ids = [int(note_id) for note_id in note_ids]
                 params["notes"] = note_ids
             if query is not None:
                 params["query"] = query
             return await self.anki_request("notesInfo", params)
 
         @self.mcp.tool()
-        async def get_notes_mod_time(ctx: Context, note_ids: list[int]) -> list[Dict[str, Any]]:
+        async def get_notes_mod_time(ctx: Context, note_ids: list[Union[str, int]]) -> list[Dict[str, Any]]:
             """Get modification times for notes.
             
             Args:
@@ -700,10 +714,11 @@ class AnkiServer:
                     - noteId: int
                     - mod: int (modification timestamp)
             """
+            note_ids = [int(note_id) for note_id in note_ids]
             return await self.anki_request("notesModTime", {"notes": note_ids})
 
         @self.mcp.tool()
-        async def remove_empty_notes(ctx: Context) -> None:
+        async def delete_empty_notes(ctx: Context) -> None:
             """Remove all empty notes."""
             return await self.anki_request("removeEmptyNotes")
 
@@ -738,6 +753,17 @@ class AnkiServer:
             """Delete a media file from Anki's media folder."""
             return await self.anki_request("deleteMediaFile", {"filename": filename})
 
+        @self.mcp.tool()
+        async def delete_deck(ctx: Context, deck_name: str, delete_cards_too: bool = False) -> None:
+            """Delete a deck."""
+            return await self.anki_request("deleteDecks", {"decks": [deck_name], "cardsToo": delete_cards_too})
+
+        # GUI
+        @self.mcp.tool()
+        async def get_current_card(ctx: Context) -> str:
+            """Get the current card."""
+            current_card = await self.anki_request("guiCurrentCard")
+            return json.dumps(current_card)
 
     def run(self):
         """Run the MCP server."""

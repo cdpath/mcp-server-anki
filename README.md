@@ -37,3 +37,10 @@ Type: stdio
 ID: Anki
 Command: uvx mcp-server-anki
 ```
+
+
+## local development
+
+```
+uv --directory $HOME/Developer/mcp-server-anki/src/mcp_server_anki run server.py
+```
