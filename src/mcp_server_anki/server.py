@@ -1,5 +1,7 @@
 import json
-from typing import Any, Dict, Optional, Union
+import base64
+from typing import Any, Dict, Optional, Union, List
+import re
 
 import aiohttp
 from mcp.server.fastmcp import Context, FastMCP
@@ -32,43 +34,346 @@ class AnkiServer:
                     raise Exception(f"AnkiConnect error: {data['error']}")
                 return data["result"]
 
+    def _parse_ids_from_path(self, path: str) -> List[str]:
+        """Parse comma-separated IDs from path."""
+        if not path:
+            return []
+        return [id.strip() for id in path.split(",") if id.strip()]
+
+    def _encode_cursor(self, data: Dict[str, Any]) -> str:
+        """Encode pagination cursor."""
+        return base64.b64encode(json.dumps(data).encode()).decode()
+
+    def _decode_cursor(self, cursor: str) -> Dict[str, Any]:
+        """Decode pagination cursor."""
+        try:
+            return json.loads(base64.b64decode(cursor).decode())
+        except Exception:
+            raise ValueError("Invalid cursor")
+
+    def _paginate_list(self, items: List[Any], cursor: Optional[str] = None, page_size: int = 50) -> Dict[str, Any]:
+        """Paginate a list of items."""
+        start_index = 0
+        if cursor:
+            cursor_data = self._decode_cursor(cursor)
+            start_index = cursor_data.get("start_index", 0)
+        
+        end_index = start_index + page_size
+        page_items = items[start_index:end_index]
+        
+        result = {"items": page_items}
+        
+        # Add nextCursor if there are more items
+        if end_index < len(items):
+            next_cursor_data = {"start_index": end_index}
+            result["nextCursor"] = self._encode_cursor(next_cursor_data)
+        
+        return result
+
     def _setup_handlers(self):
         """Set up resources and tools for the MCP server."""
 
-        @self.mcp.tool()
-        async def list_decks(ctx: Context) -> str:
-            """List all the decks"""
+        # RESOURCES (Read-only operations)
+        @self.mcp.resource("anki://decks")
+        async def get_all_decks() -> str:
+            """Get all deck names and IDs."""
             decks = await self.anki_request("deckNamesAndIds")
-            """
-            {"Default": 1}
-            """
-            return json.dumps(decks)
+            # Convert dict to list of objects for better structure
+            deck_list = [{"name": name, "id": deck_id} for name, deck_id in decks.items()]
+            return json.dumps(deck_list)
 
-        @self.mcp.tool()
-        async def get_deck_config(ctx: Context, deck_name: str) -> str:
-            """Get configuration of specific deck."""
-            config = await self.anki_request("getDeckConfig", {"deck": deck_name})
-            """
-            {
-                "lapse": {"leechFails": 8, "delays": [10], "minInt": 1, "leechAction": 0, "mult": 0},
-                "dyn": false,
-                "autoplay": true,
-                "mod": 1502970872,
-                "id": 1,
-                "maxTaken": 60,
-                "new": {"bury": true, "order": 1, "initialFactor": 2500, "perDay": 20, "delays": [1, 10], "separate": true, "ints": [1, 4, 7]},
-                "name": "Default",
-                "rev": {"bury": true, "ivlFct": 1, "ease4": 1.3, "maxIvl": 36500, "perDay": 100, "minSpace": 1, "fuzz": 0.05},
-                "timer": 0,
-                "replayq": true,
-                "usn": -1
-            }
-            """
+        @self.mcp.resource("anki://decks/{deck_id}")
+        async def get_deck_config(deck_id: str) -> str:
+            """Get configuration of specific deck by ID or name."""
+            # Try as ID first if it looks numeric, otherwise try as name
+            if deck_id.isdigit():
+                config = await self.anki_request("getDeckConfig", {"deck": int(deck_id)})
+            else:
+                config = await self.anki_request("getDeckConfig", {"deck": deck_id})
             return json.dumps(config)
 
+        @self.mcp.resource("anki://decks/{deck_id}/stats")
+        async def get_decks_stats(deck_id: str) -> str:
+            """Get statistics for a deck by deck_id"""
+            stats = await self.anki_request("getDeckStats", {"decks": [deck_id]})
+            return json.dumps(stats)
+
+        @self.mcp.resource("anki://models")
+        async def get_all_models() -> str:
+            """Get all note models with their templates and fields."""
+            model_names_and_ids = await self.anki_request("modelNamesAndIds")
+            models = await self.anki_request(
+                "findModelsById", {"modelIds": list(model_names_and_ids.values())}
+            )
+            return json.dumps(models)
+
+        @self.mcp.resource("anki://models/{model_name}")
+        async def get_model_info(model_name: str) -> str:
+            """Get model info for a specific model, including templates and fields."""
+            fields_on_templates = await self.anki_request(
+                "modelFieldsOnTemplates", {"modelName": model_name}
+            )
+            return json.dumps(fields_on_templates)
+
+        @self.mcp.resource("anki://cards/{card_ids}")
+        async def get_cards_info(card_ids: str) -> str:
+            """Get information about one or more cards (comma-separated IDs)."""
+            card_id_list = [int(card_id) for card_id in self._parse_ids_from_path(card_ids)]
+            if not card_id_list:
+                raise Exception("No card IDs provided")
+            
+            cards = await self.anki_request("cardsInfo", {"cards": card_id_list})
+            # Return single object if only one card requested, array otherwise
+            if len(card_id_list) == 1:
+                if not cards:
+                    raise Exception(f"Card {card_id_list[0]} not found")
+                return json.dumps(cards[0])
+            return json.dumps(cards)
+
+        @self.mcp.resource("anki://notes/{note_ids}")
+        async def get_notes_info(note_ids: str) -> str:
+            """Get information about one or more notes (comma-separated IDs)."""
+            note_id_list = [int(note_id) for note_id in self._parse_ids_from_path(note_ids)]
+            if not note_id_list:
+                raise Exception("No note IDs provided")
+            
+            notes = await self.anki_request("notesInfo", {"notes": note_id_list})
+            # Return single object if only one note requested, array otherwise
+            if len(note_id_list) == 1:
+                if not notes:
+                    raise Exception(f"Note {note_id_list[0]} not found")
+                return json.dumps(notes[0])
+            return json.dumps(notes)
+
+        @self.mcp.resource("anki://cards/{card_ids}/reviews")
+        async def get_cards_review_logs(card_ids: str) -> str:
+            """Get review history for one or more cards (comma-separated IDs)."""
+            card_id_list = [int(card_id) for card_id in self._parse_ids_from_path(card_ids)]
+            if not card_id_list:
+                raise Exception("No card IDs provided")
+            
+            reviews = await self.anki_request("getReviewsOfCards", {"cards": card_id_list})
+            return json.dumps(reviews)
+
+        @self.mcp.resource("anki://tags")
+        async def get_all_tags() -> str:
+            """Get all available tags."""
+            tags = await self.anki_request("getTags")
+            return json.dumps(tags)
+
+        @self.mcp.resource("anki://session/current")
+        async def get_current_session() -> str:
+            """Get current learning session state including current card."""
+            current_card = await self.anki_request("guiCurrentCard")
+            return json.dumps({
+                "current_card": current_card,
+                "timestamp": int(__import__("time").time())
+            })
+
+        @self.mcp.resource("anki://collection/stats")
+        async def get_collection_stats() -> str:
+            """Get collection statistics in HTML format."""
+            stats_html = await self.anki_request("getCollectionStatsHTML", {"wholeCollection": True})
+            return json.dumps({
+                "stats_html": stats_html,
+                "generated_at": int(__import__("time").time())
+            })
+
+        @self.mcp.resource("anki://stats/daily")
+        async def get_daily_stats() -> str:
+            """Get daily review statistics."""
+            today_reviews = await self.anki_request("getNumCardsReviewedToday")
+            return json.dumps({
+                "today": today_reviews,
+                "date": __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+            })
+
+        # TOOLS (Operations with side effects)
         @self.mcp.tool()
-        async def update_deck_config(ctx: Context, config: Dict[str, Any]) -> bool:
-            """Save deck configuration.
+        async def anki_search(
+            ctx: Context,
+            query: str,
+            search_type: str = "cards",
+            cursor: Optional[str] = None
+        ) -> str:
+            """Search cards or notes using Anki's search syntax with pagination.
+
+            Args:
+                query: Anki search query (e.g., "deck:current", "tag:important")
+                search_type: "cards" or "notes"
+                cursor: Optional pagination cursor
+
+            Returns:
+                JSON string with search results and optional nextCursor
+            """
+            if search_type not in ["cards", "notes"]:
+                raise ValueError("search_type must be 'cards' or 'notes'")
+            
+            if search_type == "cards":
+                result_ids = await self.anki_request("findCards", {"query": query})
+                data = await self.anki_request("cardsInfo", {"cards": result_ids})
+                
+            else:
+                result_ids = await self.anki_request("findNotes", {"query": query})
+                data = await self.anki_request("notesInfo", {"notes": result_ids})
+            
+            paginated = self._paginate_list(data, cursor, page_size=100)
+            return json.dumps({
+                "search_type": search_type,
+                "query": query,
+                "total_found": len(result_ids),
+                **paginated
+            })
+
+        @self.mcp.tool()
+        async def anki_create_notes(
+            ctx: Context,
+            notes: List[Dict[str, Any]]
+        ) -> List[Optional[int]]:
+            """Create one or more notes in Anki.
+
+            Args:
+                notes: List of note specifications with:
+                    - deckName: str
+                    - modelName: str
+                    - fields: Dict[str, str]
+                    - tags: Optional[List[str]]
+
+            Returns:
+                List of note IDs (None for notes that couldn't be added)
+            """
+            return await self.anki_request("addNotes", {"notes": notes})
+
+        @self.mcp.tool()
+        async def anki_update_note(ctx: Context, note: Dict[str, Any]) -> None:
+            """Update a note's fields and/or tags.
+
+            Args:
+                note: Note specification with:
+                    - id: int - Note ID
+                    - fields: Optional[Dict[str, str]] - Fields to update
+                    - tags: Optional[List[str]] - New tags
+            """
+            await self.anki_request("updateNote", {"note": note})
+
+        @self.mcp.tool()
+        async def anki_manage_tags(
+            ctx: Context,
+            action: str,
+            note_ids: List[Union[str, int]],
+            tags: str,
+            tag_to_replace: Optional[str] = None,
+            replace_with_tag: Optional[str] = None
+        ) -> None:
+            """Manage tags on notes.
+
+            Args:
+                action: "add" | "delete" | "replace"
+                note_ids: List of note IDs to modify
+                tags: Tag string for add/delete operations
+                tag_to_replace: Tag to replace (for replace action)
+                replace_with_tag: New tag (for replace action)
+            """
+            note_ids = [int(note_id) for note_id in note_ids]
+            
+            if action == "add":
+                await self.anki_request("addTags", {"notes": note_ids, "tags": tags})
+            elif action == "delete":
+                await self.anki_request("removeTags", {"notes": note_ids, "tags": tags})
+            elif action == "replace":
+                await self.anki_request("replaceTags", {
+                    "notes": note_ids,
+                    "tag_to_replace": tag_to_replace,
+                    "replace_with_tag": replace_with_tag
+                })
+            else:
+                raise ValueError(f"Invalid action: {action}. Must be 'add', 'delete', or 'replace'")
+
+        @self.mcp.tool()
+        async def anki_change_card_state(
+            ctx: Context,
+            action: str,
+            card_ids: List[Union[str, int]],
+            days: Optional[str] = None,
+            ease_factors: Optional[List[int]] = None
+        ) -> Any:
+            """Change card states and properties.
+
+            Args:
+                action: "suspend" | "unsuspend" | "forget" | "relearn" | "set_due" | "set_ease"
+                card_ids: List of card IDs to modify
+                days: Due date specification for set_due (e.g., "0", "1!", "3-7")
+                ease_factors: List of ease factors for set_ease (must match card_ids length)
+
+            Returns:
+                Result depends on action (bool for most, list for some)
+            """
+            card_ids = [int(card_id) for card_id in card_ids]
+            
+            if action == "suspend":
+                return await self.anki_request("suspend", {"cards": card_ids})
+            elif action == "unsuspend":
+                return await self.anki_request("unsuspend", {"cards": card_ids})
+            elif action == "forget":
+                await self.anki_request("forgetCards", {"cards": card_ids})
+                return True
+            elif action == "relearn":
+                await self.anki_request("relearnCards", {"cards": card_ids})
+                return True
+            elif action == "set_due":
+                if not days:
+                    raise ValueError("days parameter required for set_due action")
+                return await self.anki_request("setDueDate", {"cards": card_ids, "days": days})
+            elif action == "set_ease":
+                if not ease_factors or len(ease_factors) != len(card_ids):
+                    raise ValueError("ease_factors must match card_ids length for set_ease action")
+                return await self.anki_request("setEaseFactors", {"cards": card_ids, "easeFactors": ease_factors})
+            else:
+                raise ValueError(f"Invalid action: {action}")
+
+        @self.mcp.tool()
+        async def anki_gui_control(
+            ctx: Context,
+            action: str,
+            ease: Optional[int] = None
+        ) -> Any:
+            """Control Anki GUI for interactive learning.
+
+            Args:
+                action: "current_card" | "show_answer" | "answer" | "undo"
+                ease: Answer ease for "answer" action (1=Again, 2=Hard, 3=Good, 4=Easy)
+
+            Returns:
+                Result depends on action
+            """
+            if action == "current_card":
+                return await self.anki_request("guiCurrentCard")
+            elif action == "show_answer":
+                return await self.anki_request("guiShowAnswer")
+            elif action == "answer":
+                if ease is None:
+                    raise ValueError("ease parameter required for answer action")
+                if ease not in [1, 2, 3, 4]:
+                    raise ValueError("ease must be 1 (Again), 2 (Hard), 3 (Good), or 4 (Easy)")
+                return await self.anki_request("guiAnswerCard", {"ease": ease})
+            elif action == "undo":
+                return await self.anki_request("guiUndo")
+            else:
+                raise ValueError(f"Invalid action: {action}")
+
+        @self.mcp.tool()
+        async def anki_delete_notes(ctx: Context, note_ids: List[Union[str, int]]) -> None:
+            """Delete notes by their IDs.
+            
+            Args:
+                note_ids: List of note IDs to delete
+            """
+            note_ids = [int(note_id) for note_id in note_ids]
+            await self.anki_request("deleteNotes", {"notes": note_ids})
+
+        @self.mcp.tool()
+        async def anki_update_deck_config(ctx: Context, config: Dict[str, Any]) -> bool:
+            """Update deck configuration.
 
             Args:
                 config: Configuration object to save
@@ -77,586 +382,6 @@ class AnkiServer:
                 True if successful
             """
             return await self.anki_request("saveDeckConfig", {"config": config})
-
-        @self.mcp.tool()
-        async def list_models(ctx: Context) -> str:
-            """List all the models and their templates and fields"""
-            model_names_and_ids = await self.anki_request("modelNamesAndIds")
-            """
-            {
-                "Basic": 1483883011648,
-                "Basic (and reversed card)": 1483883011644,
-                "Basic (optional reversed card)": 1483883011631,
-                "Cloze": 1483883011630
-            }
-            """
-            models = await self.anki_request(
-                "findModelsById", {"modelIds": list(model_names_and_ids.values())}
-            )
-            """
-            [
-                {
-                "id": 1704387367119,
-                "name": "Basic",
-                "type": 0,
-                "mod": 1704387367,
-                "usn": -1,
-                "sortf": 0,
-                "did": null,
-                "tmpls": [
-                    { "name": "Card 1", "ord": 0, "qfmt": "{{Front}}", "afmt": "{{FrontSide}}\n\n<hr id=answer>\n\n{{Back}}", "bqfmt": "", "bafmt": "", "did": null, "bfont": "", "bsize": 0, "id": 9176047152973362695 }
-                ],
-                "flds": [
-                    { "name": "Front", "ord": 0, "sticky": false, "rtl": false, "font": "Arial", "size": 20, "description": "", "plainText": false, "collapsed": false, "excludeFromSearch": false, "id": 2453723143453745216, "tag": null, "preventDeletion": false },
-                    { "name": "Back", "ord": 1, "sticky": false, "rtl": false, "font": "Arial", "size": 20, "description": "", "plainText": false, "collapsed": false, "excludeFromSearch": false, "id": -4853200230425436781, "tag": null, "preventDeletion": false }
-                ],
-                "css": "",
-                "req": [...],
-                "originalStockKind": 1
-                }
-            ]
-            """
-            return json.dumps(models)
-
-        @self.mcp.tool()
-        async def get_model_info(ctx: Context, model_name: str) -> str:
-            """Get model info for a specific model, including templates and fields"""
-            fields_on_templates = await self.anki_request(
-                "modelFieldsOnTemplates", {"modelName": model_name}
-            )
-            """
-            {
-                "Card 1": [["Front"], ["Back"]],
-                "Card 2": [["Back"], ["Front"]]
-            }
-            """
-            return json.dumps(fields_on_templates)
-
-        @self.mcp.tool()
-        async def get_card_info(ctx: Context, card_id: Union[str, int]) -> str:
-            """Get information about a specific card."""
-            cards = await self.anki_request("cardsInfo", {"cards": [int(card_id)]})
-            if not cards:
-                raise Exception(f"Card {card_id} not found")
-            """
-            {
-                "answer": "back content",
-                "question": "front content",
-                "deckName": "Default",
-                "modelName": "Basic",
-                "fieldOrder": 1,
-                "fields": {
-                    "Front": {"value": "front content", "order": 0},
-                    "Back": {"value": "back content", "order": 1}
-                },
-                "css":"p {font-family:Arial;}",
-                "cardId": 1498938915662,
-                "interval": 16,
-                "note":1502298033753,
-                "ord": 1,
-                "type": 0,
-                "queue": 0,
-                "due": 1,
-                "reps": 1,
-                "lapses": 0,
-                "left": 6,
-                "mod": 1629454092
-            }
-            """
-            return json.dumps(cards[0])
-
-        @self.mcp.tool()
-        async def get_note_info(ctx: Context, note_id: Union[str, int]) -> str:
-            """Get information about a specific note."""
-            notes = await self.anki_request("notesInfo", {"notes": [int(note_id)]})
-            if not notes:
-                raise Exception(f"Note {note_id} not found")
-            """
-            {
-                "noteId":1502298033753,
-                "profile": "User_1",
-                "modelName": "Basic",
-                "tags":["tag","another_tag"],
-                "fields": {
-                    "Front": {"value": "front content", "order": 0},
-                    "Back": {"value": "back content", "order": 1}
-                },
-                "mod": 1718377864,
-                "cards": [1498938915662]
-            }            
-            """
-            return json.dumps(notes[0])
-
-        @self.mcp.tool()
-        async def list_all_tags(ctx: Context) -> str:
-            """Get all available tags."""
-            tags = await self.anki_request("getTags")
-            return json.dumps(tags)
-
-        @self.mcp.tool()
-        async def add_note(
-            ctx: Context,
-            deck_name: str,
-            model_name: str,
-            fields: Dict[str, str],
-            tags: Optional[list[str]] = None,
-        ) -> int:
-            """Create a new note in Anki.
-
-            Args:
-                deck_name: Name of the deck to add the note to
-                model_name: Name of the note model/type to use
-                fields: Map of field names to values
-                tags: Optional list of tags to apply to the note
-
-            Returns:
-                The ID of the created note
-            """
-            note = {
-                "deckName": deck_name,
-                "modelName": model_name,
-                "fields": fields,
-                "tags": tags or [],
-            }
-            return await self.anki_request("addNote", {"note": note})
-
-        @self.mcp.tool()
-        async def search_notes(ctx: Context, query: str = "deck:current") -> list[int]:
-            """Find notes using Anki's search syntax."""
-            return await self.anki_request("findNotes", {"query": query})
-
-        @self.mcp.tool()
-        async def search_cards(ctx: Context, query: str = "deck:current") -> list[int]:
-            """Find cards using Anki's search syntax."""
-            return await self.anki_request("findCards", {"query": query})
-
-        @self.mcp.tool()
-        async def delete_notes(ctx: Context, note_ids: list[Union[str, int]]) -> None:
-            """Delete notes by their IDs."""
-            await self.anki_request("deleteNotes", {"notes": note_ids})
-
-        @self.mcp.tool()
-        async def add_tags(
-            ctx: Context, note_ids: list[Union[str, int]], tags: str
-        ) -> None:
-            """Add tags to notes."""
-            await self.anki_request("addTags", {"notes": note_ids, "tags": tags})
-
-        @self.mcp.tool()
-        async def delete_tags(
-            ctx: Context, note_ids: list[Union[str, int]], tags: str
-        ) -> None:
-            """Remove tags from notes."""
-            await self.anki_request("removeTags", {"notes": note_ids, "tags": tags})
-
-        @self.mcp.tool()
-        async def batch_get_cards_info(
-            ctx: Context, card_ids: list[Union[str, int]]
-        ) -> list[Dict[str, Any]]:
-            """Get information about specific cards."""
-            return await self.anki_request("cardsInfo", {"cards": card_ids})
-
-        @self.mcp.tool()
-        async def batch_get_decks_stats(
-            ctx: Context, decks: list[str]
-        ) -> Dict[str, Any]:
-            """Get statistics about decks.
-
-            Args:
-                decks: List of deck names
-
-            Returns:
-                Dict containing statistics for each deck
-            """
-            return await self.anki_request("getDeckStats", {"decks": decks})
-
-        @self.mcp.tool()
-        async def batch_get_cards_review_logs(
-            ctx: Context, card_ids: list[Union[str, int]]
-        ) -> list[Dict[str, Any]]:
-            """Get review history for specific cards."""
-            return await self.anki_request("getReviewsOfCards", {"cards": card_ids})
-
-        @self.mcp.tool()
-        async def get_num_cards_reviewed_by_day(
-            ctx: Context, today: bool = True
-        ) -> list[tuple[str, int]]:
-            """Gets the number of cards reviewed per day.
-
-            Returns:
-                A list of tuples containing (date_string, review_count)
-                date_string format: "YYYY-MM-DD"
-            """
-            if today:
-                return await self.anki_request("getNumCardsReviewedToday")
-            else:
-                return await self.anki_request("getNumCardsReviewedByDay")
-
-        @self.mcp.tool()
-        async def get_collection_stats(
-            ctx: Context, whole_collection: bool = True
-        ) -> str:
-            """Gets the collection statistics report in HTML format.
-
-            Args:
-                whole_collection: If True, gets stats for the whole collection. If False, gets stats for the current deck.
-
-            Returns:
-                HTML string containing the statistics report
-            """
-            return await self.anki_request(
-                "getCollectionStatsHTML", {"wholeCollection": whole_collection}
-            )
-
-        @self.mcp.tool()
-        async def get_card_reviews(
-            ctx: Context, deck_name: str, start_id: int
-        ) -> list[tuple[int, int, int, int, int, int, int, int, int]]:
-            """Gets all card reviews for a specified deck after a certain time.
-
-            Args:
-                deck_name: Name of the deck to get reviews for
-                start_id: Latest unix time not included in the result
-
-            Returns:
-                List of tuples containing:
-                (reviewTime, cardID, usn, buttonPressed, newInterval, previousInterval, newFactor, reviewDuration, reviewType)
-            """
-            return await self.anki_request(
-                "cardReviews", {"deck": deck_name, "startID": start_id}
-            )
-
-        @self.mcp.tool()
-        async def get_latest_review_time(ctx: Context, deck_name: str) -> int:
-            """Gets the unix time of the latest review for the given deck.
-
-            Args:
-                deck_name: Name of the deck to get the latest review time for
-
-            Returns:
-                Unix timestamp of the latest review, or 0 if no reviews exist
-            """
-            return await self.anki_request("getLatestReviewID", {"deck": deck_name})
-
-        @self.mcp.tool()
-        async def get_ease_factors(
-            ctx: Context, card_ids: list[Union[str, int]]
-        ) -> list[int]:
-            """Gets the ease factor for each of the given cards.
-
-            Args:
-                card_ids: List of card IDs to get ease factors for
-
-            Returns:
-                List of ease factors (in the same order as the input cards)
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            return await self.anki_request("getEaseFactors", {"cards": card_ids})
-
-        @self.mcp.tool()
-        async def set_ease_factors(
-            ctx: Context, card_ids: list[Union[str, int]], ease_factors: list[int]
-        ) -> list[bool]:
-            """Sets ease factor of cards by card ID.
-
-            Args:
-                card_ids: List of card IDs to set ease factors for
-                ease_factors: List of ease factors to set (must match length of card_ids)
-
-            Returns:
-                List of booleans indicating success for each card
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            return await self.anki_request(
-                "setEaseFactors", {"cards": card_ids, "easeFactors": ease_factors}
-            )
-
-        @self.mcp.tool()
-        async def suspend_cards(ctx: Context, card_ids: list[Union[str, int]]) -> bool:
-            """Suspend cards by card ID.
-
-            Args:
-                card_ids: List of card IDs to suspend
-
-            Returns:
-                True if successful (at least one card wasn't already suspended)
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            return await self.anki_request("suspend", {"cards": card_ids})
-
-        @self.mcp.tool()
-        async def unsuspend_cards(
-            ctx: Context, card_ids: list[Union[str, int]]
-        ) -> bool:
-            """Unsuspend cards by card ID.
-
-            Args:
-                card_ids: List of card IDs to unsuspend
-
-            Returns:
-                True if successful (at least one card was previously suspended)
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            return await self.anki_request("unsuspend", {"cards": card_ids})
-
-        @self.mcp.tool()
-        async def are_suspended(
-            ctx: Context, card_ids: list[Union[str, int]]
-        ) -> list[Optional[bool]]:
-            """Check suspension status for multiple cards.
-
-            Args:
-                card_ids: List of card IDs to check
-
-            Returns:
-                List of booleans (True if suspended) or None if card doesn't exist
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            return await self.anki_request("areSuspended", {"cards": card_ids})
-
-        @self.mcp.tool()
-        async def are_due(ctx: Context, card_ids: list[Union[str, int]]) -> list[bool]:
-            """Check if cards are due.
-
-            Args:
-                card_ids: List of card IDs to check
-
-            Returns:
-                List of booleans indicating whether each card is due
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            return await self.anki_request("areDue", {"cards": card_ids})
-
-        @self.mcp.tool()
-        async def get_intervals(
-            ctx: Context, card_ids: list[Union[str, int]], complete: bool = False
-        ) -> Union[list[int], list[list[int]]]:
-            """Get intervals for cards.
-
-            Args:
-                card_ids: List of card IDs to get intervals for
-                complete: If True, returns all intervals, if False returns only most recent
-
-            Returns:
-                If complete=False: List of most recent intervals
-                If complete=True: List of lists containing all intervals
-                Negative intervals are in seconds, positive intervals in days
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            return await self.anki_request(
-                "getIntervals", {"cards": card_ids, "complete": complete}
-            )
-
-        @self.mcp.tool()
-        async def lookup_note_ids_for_cards(
-            ctx: Context, card_ids: list[Union[str, int]]
-        ) -> list[int]:
-            """Convert card IDs to their corresponding note IDs.
-
-            Args:
-                card_ids: List of card IDs to convert
-
-            Returns:
-                List of unique note IDs (duplicates removed)
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            return await self.anki_request("cardsToNotes", {"cards": card_ids})
-
-        @self.mcp.tool()
-        async def get_cards_modification_time(
-            ctx: Context, card_ids: list[Union[str, int]]
-        ) -> list[Dict[str, Any]]:
-            """Get modification times for cards.
-
-            Args:
-                card_ids: List of card IDs to get modification times for
-
-            Returns:
-                List of objects containing cardId and mod timestamp
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            return await self.anki_request("cardsModTime", {"cards": card_ids})
-
-        @self.mcp.tool()
-        async def forget_cards(ctx: Context, card_ids: list[Union[str, int]]) -> None:
-            """Reset cards to new state.
-
-            Args:
-                card_ids: List of card IDs to reset
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            await self.anki_request("forgetCards", {"cards": card_ids})
-
-        @self.mcp.tool()
-        async def relearn_cards(ctx: Context, card_ids: list[Union[str, int]]) -> None:
-            """Make cards relearning.
-
-            Args:
-                card_ids: List of card IDs to set to relearning
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            await self.anki_request("relearnCards", {"cards": card_ids})
-
-        @self.mcp.tool()
-        async def set_due_date(
-            ctx: Context, card_ids: list[Union[str, int]], days: str
-        ) -> bool:
-            """Set due date for cards.
-
-            Args:
-                card_ids: List of card IDs to set due date for
-                days: Due date specification:
-                    - "0" = today
-                    - "1!" = tomorrow + change interval to 1
-                    - "3-7" = random choice between 3-7 days
-
-            Returns:
-                True if successful
-            """
-            card_ids = [int(card_id) for card_id in card_ids]
-            return await self.anki_request(
-                "setDueDate", {"cards": card_ids, "days": days}
-            )
-
-        @self.mcp.tool()
-        async def add_notes(
-            ctx: Context, notes: list[Dict[str, Any]]
-        ) -> list[Optional[int]]:
-            """Add multiple notes at once.
-
-            Args:
-                notes: List of note specifications with:
-                    - deckName: str
-                    - modelName: str
-                    - fields: Dict[str, str]
-                    - tags: Optional[list[str]]
-                    - audio: Optional[list[Dict]] - Audio attachments
-                    - video: Optional[list[Dict]] - Video attachments
-                    - picture: Optional[list[Dict]] - Picture attachments
-
-            Returns:
-                List of note IDs (None for notes that couldn't be added)
-            """
-            return await self.anki_request("addNotes", {"notes": notes})
-
-        @self.mcp.tool()
-        async def update_note(ctx: Context, note: Dict[str, Any]) -> None:
-            """Update a note's fields and/or tags.
-
-            Args:
-                note: Note specification with:
-                    - id: int - Note ID
-                    - fields: Optional[Dict[str, str]] - Fields to update
-                    - tags: Optional[list[str]] - New tags
-                    - audio: Optional[list[Dict]] - Audio attachments
-                    - video: Optional[list[Dict]] - Video attachments
-                    - picture: Optional[list[Dict]] - Picture attachments
-            """
-            await self.anki_request("updateNote", {"note": note})
-
-        @self.mcp.tool()
-        async def replace_tags(
-            ctx: Context,
-            replace_all: bool = False,
-            note_ids: Optional[list[Union[str, int]]] = None,
-            tag_to_replace: str = None,
-            replace_with_tag: str = None,
-        ) -> None:
-            """Replace tags in specific notes or all notes.
-
-            Args:
-                replace_all: If True, replace tags in all notes
-                note_ids: List of note IDs to modify
-                tag_to_replace: Tag to replace
-                replace_with_tag: New tag
-            """
-            if replace_all:
-                await self.anki_request(
-                    "replaceTagsInAllNotes",
-                    {
-                        "tag_to_replace": tag_to_replace,
-                        "replace_with_tag": replace_with_tag,
-                    },
-                )
-            else:
-                note_ids = [int(note_id) for note_id in note_ids]
-                await self.anki_request(
-                    "replaceTags",
-                    {
-                        "notes": note_ids,
-                        "tag_to_replace": tag_to_replace,
-                        "replace_with_tag": replace_with_tag,
-                    },
-                )
-
-        @self.mcp.tool()
-        async def get_notes_info(
-            ctx: Context,
-            note_ids: Optional[list[Union[str, int]]] = None,
-            query: Optional[str] = None,
-        ) -> list[Dict[str, Any]]:
-            """Get detailed information about notes.
-
-            Args:
-                note_ids: Optional list of note IDs to get info for
-                query: Optional search query to find notes
-                (One of note_ids or query must be provided)
-
-            Returns:
-                List of note information objects containing:
-                    - noteId: int
-                    - modelName: str
-                    - tags: list[str]
-                    - fields: Dict[str, Dict[str, Any]]
-                    - cards: list[int]
-            """
-            params = {}
-            if note_ids is not None:
-                note_ids = [int(note_id) for note_id in note_ids]
-                params["notes"] = note_ids
-            if query is not None:
-                params["query"] = query
-            return await self.anki_request("notesInfo", params)
-
-        # GUI
-        @self.mcp.tool()
-        async def get_current_card(ctx: Context) -> str:
-            """Get the current card."""
-            current_card = await self.anki_request("guiCurrentCard")
-            return json.dumps(current_card)
-
-        @self.mcp.tool()
-        async def gui_show_answer(ctx: Context) -> bool:
-            """Show the answer for the current card.
-
-            Returns:
-                True if successful, False otherwise
-            """
-            return await self.anki_request("guiShowAnswer")
-
-        @self.mcp.tool()
-        async def gui_answer_card(ctx: Context, ease: int) -> bool:
-            """Answer the current card.
-
-            Note: The answer for the current card must be displayed before any answer can be accepted by Anki.
-            Use gui_show_answer first if needed.
-
-            Args:
-                ease: 1=Again, 2=Hard, 3=Good, 4=Easy
-
-            Returns:
-                True if successful, False otherwise
-            """
-            return await self.anki_request("guiAnswerCard", {"ease": ease})
-
-        @self.mcp.tool()
-        async def gui_undo(ctx: Context) -> bool:
-            """Undo the last action.
-
-            Returns:
-                True if successful, False otherwise
-            """
-            return await self.anki_request("guiUndo")
 
     def run(self):
         """Run the MCP server."""
