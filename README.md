@@ -1,5 +1,7 @@
 # mcp-anki-server
 
+for go version, see https://github.com/cdpath/anki-mcp
+
 ## prerequisite
 
 - [Anki Desktop](https://apps.ankiweb.net/)
@@ -8,13 +10,6 @@
 
 
 ## usage
-
-### Claude Desktop
-
-![](./assets/claude-desktop.png)
-
-1. Download the dxt package from [releases](https://github.com/cdpath/mcp-server-anki/releases/tag/0.3.0)
-2. (macOS) fix executable permission by `chmod +x "$HOME/Library/Application Support/Claude/Claude Extensions/local.dxt.cdpath.mcp-server-anki/server/mcp-server-anki-go"`
 
 ### cursor
 
