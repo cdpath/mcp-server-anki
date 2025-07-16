@@ -355,6 +355,8 @@ class AnkiServer:
                     raise ValueError("ease parameter required for answer action")
                 if ease not in [1, 2, 3, 4]:
                     raise ValueError("ease must be 1 (Again), 2 (Hard), 3 (Good), or 4 (Easy)")
+                # ensure the card is on the answer side
+                await self.anki_request("guiShowAnswer")
                 return await self.anki_request("guiAnswerCard", {"ease": ease})
             elif action == "undo":
                 return await self.anki_request("guiUndo")
