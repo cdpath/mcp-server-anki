@@ -117,3 +117,6 @@ dmypy.json
 
 # Reference files
 Reference/
+
+
+.DS_Store

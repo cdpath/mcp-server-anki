@@ -1,0 +1,163 @@
+{
+  "dxt_version": "0.1",
+  "name": "mcp-server-anki",
+  "display_name": "Anki MCP Server",
+  "version": "1.0.0",
+  "description": "Access and manage Anki flashcards through Claude Desktop",
+  "long_description": "This extension provides Claude Desktop with full access to your Anki flashcards. You can search cards, create new notes, manage tags, review cards, and control the Anki GUI - all while keeping your data local and private.\n\n**Features:**\n- Search and browse your Anki decks and cards\n- Create new flashcards with custom fields and tags\n- Manage card states (suspend, unsuspend, forget, relearn)\n- Control Anki GUI for interactive learning\n- View statistics and review history\n- Tag management and organization\n\n**Requirements:**\n- Anki with AnkiConnect add-on installed and running\n- AnkiConnect running on the specified URL (default: http://localhost:8765)",
+  "author": {
+    "name": "cdpath",
+    "email": "cdpath@outlook.com",
+    "url": "https://github.com/cdpath/mcp-server-anki"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cdpath/mcp-server-anki"
+  },
+  "homepage": "https://github.com/cdpath/mcp-server-anki",
+  "documentation": "https://github.com/cdpath/mcp-server-anki/blob/go/README.md",
+  "support": "https://github.com/cdpath/mcp-server-anki/issues",
+  "icon": "icon.png",
+  "screenshots": [
+    "assets/screenshots/anki-interface.png"
+  ],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/mcp-server-anki-go",
+    "mcp_config": {
+      "command": "${__dirname}/server/mcp-server-anki-go",
+      "args": [
+        "-anki-connect",
+        "${user_config.anki_connect_url}"
+      ],
+      "env": {
+        "ANKI_CONNECT_URL": "${user_config.anki_connect_url}"
+      },
+      "platforms": {
+        "darwin": {
+          "command": "${__dirname}/server/mcp-server-anki-go-darwin",
+          "args": [
+            "-anki-connect",
+            "${user_config.anki_connect_url}"
+          ]
+        },
+        "win32": {
+          "command": "${__dirname}/server/mcp-server-anki-go-windows.exe",
+          "args": [
+            "-anki-connect",
+            "${user_config.anki_connect_url}"
+          ]
+        },
+        "linux": {
+          "command": "${__dirname}/server/mcp-server-anki-go-linux",
+          "args": [
+            "-anki-connect",
+            "${user_config.anki_connect_url}"
+          ]
+        }
+      }
+    }
+  },
+  "user_config": {
+    "anki_connect_url": {
+      "type": "string",
+      "title": "AnkiConnect URL",
+      "description": "The URL where AnkiConnect is running",
+      "default": "http://localhost:8765",
+      "required": true,
+      "sensitive": false
+    }
+  },
+  "tools": [
+    {
+      "name": "anki_search",
+      "description": "Search cards or notes using Anki's search syntax with pagination"
+    },
+    {
+      "name": "anki_create_notes",
+      "description": "Create one or more notes in Anki"
+    },
+    {
+      "name": "anki_update_note",
+      "description": "Update a note's fields and/or tags"
+    },
+    {
+      "name": "anki_manage_tags",
+      "description": "Manage tags on notes (add, delete, or replace)"
+    },
+    {
+      "name": "anki_change_card_state",
+      "description": "Change card states and properties (suspend, unsuspend, forget, relearn, set due date, set ease factors)"
+    },
+    {
+      "name": "anki_gui_control",
+      "description": "Control Anki GUI for interactive learning (show current card, show answer, answer card, undo)"
+    },
+    {
+      "name": "anki_delete_notes",
+      "description": "Delete notes by their IDs"
+    },
+    {
+      "name": "anki_update_deck_config",
+      "description": "Update deck configuration"
+    }
+  ],
+  "resources": [
+    {
+      "uri": "anki://decks",
+      "description": "Get all deck names and IDs"
+    },
+    {
+      "uri": "anki://decks/{deck_id}",
+      "description": "Get configuration of specific deck by ID or name"
+    },
+    {
+      "uri": "anki://decks/{deck_id}/stats",
+      "description": "Get statistics for a deck by deck_id"
+    },
+    {
+      "uri": "anki://models",
+      "description": "Get all note models with their templates and fields"
+    },
+    {
+      "uri": "anki://models/{model_name}",
+      "description": "Get model info for a specific model, including templates and fields"
+    },
+    {
+      "uri": "anki://cards/{card_ids}",
+      "description": "Get information about one or more cards (comma-separated IDs)"
+    },
+    {
+      "uri": "anki://notes/{note_ids}",
+      "description": "Get information about one or more notes (comma-separated IDs)"
+    },
+    {
+      "uri": "anki://cards/{card_ids}/reviews",
+      "description": "Get review history for one or more cards (comma-separated IDs)"
+    },
+    {
+      "uri": "anki://tags",
+      "description": "Get all available tags"
+    },
+    {
+      "uri": "anki://session/current",
+      "description": "Get current learning session state including current card"
+    },
+    {
+      "uri": "anki://collection/stats",
+      "description": "Get collection statistics in HTML format"
+    },
+    {
+      "uri": "anki://stats/daily",
+      "description": "Get daily review statistics"
+    }
+  ],
+  "keywords": [
+    "anki",
+    "flashcards",
+    "learning",
+    "spaced-repetition",
+    "education",
+    "productivity"
+  ]
+} 
